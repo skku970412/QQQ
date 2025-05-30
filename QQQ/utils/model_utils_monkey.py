@@ -1,16 +1,10 @@
-#머델유틸원본근접
-# llama 2 모델에서는 준수하게 돌아감
-#llama3 는 메모리터짐
-
-# PPL 4.4468
-#에다가
-# 몽키패치한거
-# -> 
-# {'results': {'wikitext2': {'ppl': 4042.778564453125}}, 'versions': {'wikitext2': 0}, 'n-shot': {'wikitext2': 0}}
-# |  Tasks  |Version|Filter|n-shot|Metric|  Value  |   |Stderr|
-# |---------|------:|------|-----:|------|--------:|---|------|
-# |wikitext2|      0|      |     0|ppl   |4042.7786|   |      |
-
+# bool-mask 패치
+# 1. LlamaModel._update_causal_mask 메서드 교체
+# 2. bool-mask 생성
+# 3. bool-mask을 CPU에 저장
+# 4. bool-mask을 model.model.causal_mask에 저장
+# 5. model.model.causal_mask을 CPU에 저장
+# 6. model.model.causal_mask을 model.model.causal_mask에 저장
 
 import torch
 import torch.nn as nn
@@ -35,6 +29,37 @@ _MODEL_TYPE = {
     "LLaMAForCausalLM": "llama",
     "Qwen2ForCausalLM": "qwen2",
 }
+# ----------------- ❶ GPTQ/OOM 대응: bool-mask 패치 -----------------
+def _llama_bool_causal_mask(self, attention_mask, inputs_embeds):
+    """
+    drop-in replacement for LlamaModel._update_causal_mask
+    • causal_mask 를 always **bool** 로 유지
+    • 필요 크기만 그때그때 생성
+    • dtype 변환(x), device 만 맞춰 줌
+    => VRAM < 100 MB  /  no OOM
+    """
+    bsz, seq_len, _ = inputs_embeds.size()
+
+    if (getattr(self, "causal_mask", None) is None) or (
+        seq_len > self.causal_mask.shape[-1]
+    ):
+        # 새(mask) 생성 - still bool
+        self.causal_mask = torch.triu(
+            torch.ones(seq_len, seq_len, dtype=torch.bool, device=inputs_embeds.device),
+            diagonal=1,
+        )
+
+    # ★ bool 그대로!  ( 이후 attention 안에서 float16 곱셈 XOR 로 처리됨 )
+    causal = self.causal_mask[None, None, :seq_len, :seq_len]
+
+    if attention_mask is not None:
+        causal = causal | attention_mask[:, None, None, :]
+
+    return causal
+# 실제 메서드 교체
+from transformers.models.llama.modeling_llama import LlamaModel
+LlamaModel._update_causal_mask = _llama_bool_causal_mask
+# ---------------------------------------------------------------
 
 
 def build_model_and_tokenizer(
@@ -43,29 +68,37 @@ def build_model_and_tokenizer(
     tokenizer = AutoTokenizer.from_pretrained(
         tokenizer_path, trust_remote_code=trust_remote_code
     )
-    tokenizer.model_max_length = 2048
+    tokenizer.__call__ = functools.partial(tokenizer.__call__, add_special_tokens=False)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
     kwargs = {
-        "torch_dtype": str2torch_dtype(dtype),
-        "device_map": "auto",
+        # "load_in_8bit": True,              # 8-bit로 바로 로드 (bitsandbytes 필요)
+        # "load_in_4bit": True,            # 4-bit로 하고 싶으면 8bit 대신 사용
+        "torch_dtype": torch.float16,      # 커널 dtype
+        "device_map": {"": "cpu"},         # 처음엔 전부 CPU
+        "max_memory": {"cpu": "40GiB"},    # CPU RAM 한도
+        "low_cpu_mem_usage": True,         # 로드 단계 메모리 절약
     }
-    # 이건 원래코드드
-    # model = AutoModelForCausalLM.from_pretrained(
-    #     model_path, trust_remote_code=trust_remote_code, **kwargs
-    # )
-    # spda써보기
     model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        torch_dtype=torch.float16, 
-        device_map="auto",
-        attn_implementation="flash_attention_2",
-        max_memory={0: "18GB",
-                    1: "18GB",
-                    2: "18GB",},             # 전체를 일단 CPU에 로드
-
+        model_path, trust_remote_code=trust_remote_code, **kwargs
     )
+    # model.model.causal_mask = None  
+    # ▶▶ 3080 VRAM /OOM 방지—최대 2048 토큰용 마스크만 미리 생성
+    max_len = 2048                         # 필요하면 1024 · 4096 등으로 조정
+    mask = torch.triu(
+        torch.ones(max_len, max_len, dtype=torch.bool), diagonal=1
+    )
+    # model.model.causal_mask = mask         # CPU 텐서라 VRAM 차지 X
+    # ---- ① max_length 만큼만 마스크를 만들고
+    max_len = 2048 if hasattr(model.config, "max_length") else 4096
+    model.config.max_position_embeddings = max_len
 
+    causal = torch.full(
+        (max_len, max_len), True, dtype=torch.bool
+    ).triu(diagonal=1)
+
+    # ---- ② CPU bool 텐서 그대로 유지 (VRAM X)
+    model.model.causal_mask = causal     # <= bool, device='cpu'
     return model, tokenizer
 
 

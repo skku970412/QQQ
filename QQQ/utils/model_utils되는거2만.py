@@ -3,13 +3,6 @@
 #llama3 는 메모리터짐
 
 # PPL 4.4468
-#에다가
-# 몽키패치한거
-# -> 
-# {'results': {'wikitext2': {'ppl': 4042.778564453125}}, 'versions': {'wikitext2': 0}, 'n-shot': {'wikitext2': 0}}
-# |  Tasks  |Version|Filter|n-shot|Metric|  Value  |   |Stderr|
-# |---------|------:|------|-----:|------|--------:|---|------|
-# |wikitext2|      0|      |     0|ppl   |4042.7786|   |      |
 
 
 import torch
@@ -36,6 +29,35 @@ _MODEL_TYPE = {
     "Qwen2ForCausalLM": "qwen2",
 }
 
+# examples/quant_model.py 맨 위
+
+# import torch
+# from transformers.models.llama.modeling_llama import LlamaModel
+
+# # 1) 원본 시그니처 그대로 백업
+# _orig_update = LlamaModel._update_causal_mask
+
+# # 2) CPU 전용 mask 생성 함수
+# def _cpu_update_causal_mask(self, attention_mask, input_tensor):
+#     # input_tensor: (batch, seq_len, dim)
+#     seq_len = input_tensor.size(1)
+#     # CPU에서 (1,1,seq_len,seq_len) causal mask 만들기
+#     causal = torch.arange(seq_len, device="cpu")[None, None, :] \
+#            <= torch.arange(seq_len, device="cpu")[:, None][None, :, :]
+#     if attention_mask is not None:
+#         # attention_mask: (batch, seq_len) → (batch,1,1,seq_len)
+#         attn = attention_mask[:, None, None, :].cpu().bool()
+#         causal &= attn
+#     # GPU로 올리지 않고, dtype·device 정보만 맞춰서 리턴
+#     return causal.to(device=input_tensor.device, dtype=input_tensor.dtype)
+
+# # 3) 패치 적용
+# LlamaModel._update_causal_mask = _cpu_update_causal_mask
+
+
+
+
+
 
 def build_model_and_tokenizer(
     model_path, tokenizer_path, dtype: str, trust_remote_code: bool = True
@@ -54,12 +76,9 @@ def build_model_and_tokenizer(
     # model = AutoModelForCausalLM.from_pretrained(
     #     model_path, trust_remote_code=trust_remote_code, **kwargs
     # )
-    # spda써보기
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
-        torch_dtype=torch.float16, 
         device_map="auto",
-        attn_implementation="flash_attention_2",
         max_memory={0: "18GB",
                     1: "18GB",
                     2: "18GB",},             # 전체를 일단 CPU에 로드

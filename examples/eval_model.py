@@ -17,6 +17,20 @@ from QQQ.utils import (
 )
 from QQQ.gptq.models import get_quantized_model_class
 
+import os
+import psutil
+import subprocess
+
+def get_driver_gpu_used(gpu_index: int = 0) -> float:
+    """nvidia-smi를 이용한 GPU 사용량 측정 (MiB)"""
+    out = subprocess.check_output([
+        "nvidia-smi",
+        "--query-gpu=memory.used",
+        "--format=csv,noheader,nounits",
+        "-i", str(gpu_index)
+    ])
+    return max(float(x) for x in out.decode().splitlines() if x.strip())
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -41,10 +55,16 @@ def parse_args():
     return parser.parse_args()
 
 
+import time
+
 @torch.no_grad()
 def eval_model(model, tokenizer, args):
     max_length = args.max_length
     results = {}
+    # ---- 시간 및 peak 메모리 측정 준비 ----
+    torch.cuda.reset_peak_memory_stats()
+    start_time = time.time()
+
     # eval ppl
     if args.eval_ppl:
         for task in ["wikitext2"]:
@@ -62,11 +82,16 @@ def eval_model(model, tokenizer, args):
             nsamples = testenc.numel() // max_length
 
             nlls = []
+            infer_times = []  # 각 배치별 시간 저장 (옵션)
             for i in tqdm(range(nsamples)):
                 batched_inps = testenc[:, (i * max_length) : ((i + 1) * max_length)].to(
                     model.device
                 )
+                t0 = time.time()  # 배치별 시간 측정 시작
                 outputs = model.model(batched_inps)
+                t1 = time.time()  # 배치별 시간 측정 종료
+                infer_times.append(t1 - t0)  # 리스트에 추가
+
                 hidden_states = outputs[0]
                 logits = model.lm_head(hidden_states)
                 shift_logits = logits[:, :-1, :]
@@ -83,39 +108,36 @@ def eval_model(model, tokenizer, args):
 
             ppl = torch.exp(torch.stack(nlls).sum() / (nsamples * max_length))
 
-            result = collections.defaultdict(dict)
-            versions = collections.defaultdict(dict)
-            n_shot = collections.defaultdict(dict)
-            result[task]["ppl"] = ppl.item()
-            versions[task] = 0
-            n_shot[task] = 0
-            t_results = {
-                "results": dict(result),
-                "versions": dict(versions),
-                "n-shot": dict(n_shot),
-            }
-            print(t_results)
-            update_results(results, t_results)
-    # eval other datasets
-    if args.tasks != "":
-        task_names = pattern_match(args.tasks.split(","), tasks.TaskManager().all_tasks)
-        lm = HFLM(
-            pretrained=model,
-            backend="causal",
-            device="cuda",
-            batch_size=args.batch_size,
-            tokenizer=tokenizer,
-            max_lengt=max_length,
-        )
-        t_results = simple_evaluate(
-            lm,
-            tasks=task_names,
-            num_fewshot=args.num_fewshot,
-            batch_size=args.batch_size,
-        )
-        update_results(results, t_results)
+            # --- 시간 및 peak 메모리 측정 종료 ---
+        # 2. 아래 블록을 바로 이어서 추가하세요
+        # --- 시간 및 peak 메모리 측정 종료 ---
+        total_time = time.time() - start_time
+        peak_mem_pt = torch.cuda.max_memory_allocated() / (1024 ** 2)  # MB
+        peak_mem_driver = get_driver_gpu_used(0)  # GPU index 0
+        cpu_rss = psutil.Process(os.getpid()).memory_info().rss / (1024 ** 2)  # MB
 
+        result = collections.defaultdict(dict)
+        versions = collections.defaultdict(dict)
+        n_shot = collections.defaultdict(dict)
+        result[task]["ppl"] = ppl.item()
+        result[task]["peak_mem_PT_MB"] = peak_mem_pt
+        result[task]["peak_mem_nvidia_smi_MB"] = peak_mem_driver
+        result[task]["cpu_mem_MB"] = cpu_rss
+        result[task]["total_infer_time_sec"] = total_time
+        result[task]["avg_infer_time_per_batch_sec"] = sum(infer_times) / len(infer_times)
+        versions[task] = 0
+        n_shot[task] = 0
+        t_results = {
+            "results": dict(result),
+            "versions": dict(versions),
+            "n-shot": dict(n_shot),
+        }
+        print(t_results)
+        update_results(results, t_results)
     print(lm_eval.utils.make_table(results))
+
+
+
 
 
 if __name__ == "__main__":
@@ -134,6 +156,7 @@ if __name__ == "__main__":
         quant_config=quant_config,
         device_map="sequential",
         torch_dtype=torch.float16,
+        # attn_implementation="flash_attention_2"
     )
     tokenizer = AutoTokenizer.from_pretrained(
         args.tokenizer_path,

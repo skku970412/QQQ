@@ -1,3 +1,6 @@
+import sys
+sys.path = ['.'] + [p for p in sys.path if 'QQQ_jaeuk' not in p]
+
 import argparse
 import logging
 import os
@@ -286,7 +289,7 @@ def main():
     model, tokenizer = build_model_and_tokenizer(
         args.model_path, args.tokenizer_path, args.dtype
     )
-
+    tokenizer.model_max_length = args.max_length 
     # rotate model
     if args.rotation:
         model = fuse_layer_norms(model)
@@ -307,6 +310,7 @@ def main():
         model, tokenizer = build_model_and_tokenizer(
             args.model_path, args.tokenizer_path, args.dtype
         )
+        tokenizer.model_max_length = args.max_length 
         if args.rotation:
             # NOTE(HandH1998): smooth scale should work on the rotated model
             model = fuse_layer_norms(model)
@@ -327,8 +331,24 @@ def main():
     }
 
     # save quantized model
+    # state_dict = remove_empty_parameters(model)
+    # model.save_pretrained(args.save_path, state_dict=state_dict)
+    
+    
+    
+    # # Quantized model을 PyTorch pickle(.bin)으로 저장
     state_dict = remove_empty_parameters(model)
-    model.save_pretrained(args.save_path, state_dict=state_dict)
+    model.save_pretrained(
+        args.save_path,
+        state_dict=state_dict,
+        safe_serialization=False,   # ← 이 플래그를 꺼야 .bin으로 저장됩니다
+    )
+    # # (선택) .bin을 .pt로 바꾸고 싶다면:
+    # bin = os.path.join(args.save_path, "pytorch_model.bin")
+    # pt  = os.path.join(args.save_path, "pytorch_model.pt")
+    # os.replace(bin, pt)
+    # print(f"Saved model_state_dict.pt at {pt}")
+    
     tokenizer.save_pretrained(args.save_path)
     logger.info(
         "Quant Finished! The quantized model is saved at {}.".format(args.save_path)

@@ -53,11 +53,22 @@ def gptq_llama_func(model, dataloader, dev, args, force_to_cpu=False):
             raise ValueError
 
     layers[0] = Catcher(layers[0])
-    for batch in dataloader:
+    # for batch in dataloader:
+    #     try:
+    #         model(batch[0].to(dev))
+    #     except ValueError:
+    #         pass
+    for batch in dataloader: 
+        # batch[0]: Tensor(shape=(batch_size, seq_len))
+        x = batch[0]
+        if x.size(1) > 2048:
+            x = x[:, : 2048]
         try:
-            model(batch[0].to(dev))
-        except ValueError:
+            model(x.to(dev))
+        except ValueError: 
             pass
+
+
     layers[0] = layers[0].module
 
     if force_to_cpu:
