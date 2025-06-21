@@ -1,114 +1,135 @@
-# QQQ — Conda Environment Setup Guide
+# QQQ: Quality Quattuor‑Bit Quantization for Large Language Models
 
-**Purpose :** spin up a fully reproducible Python + CUDA environment so you can **quantize, evaluate and run W4A8 QQQ models** right after cloning the repo.
+> **Effortlessly compress — and *accelerate* — LLMs with 4‑bit weights (W4) & 8‑bit activations (A8).**
+
+QQQ is a research‑driven, hardware‑friendly W4A8 post‑training quantization toolkit.
+It allows **3.18 B‑parameter and larger models** to run up to **≈ 2.2× faster** than their FP16 counterparts while retaining near‑original perplexity and zero‑shot accuracy.
+
+<div align="center">
+  <img src="assets/figures/throughput.png" alt="Throughput comparison" width="600"/>
+</div>
 
 ---
 
-## 1‑Step Install *(recommended)*
+## 🔑 Key Features
 
-The repo already ships with an `environment.yml` describing every required package (Python 3.9, PyTorch 2.6 + CUDA 12.4, Transformers 4.38.2, etc.). Use it to create the entire environment in one shot.
+* **W4A8 end‑to‑end pipeline** – adaptive activation smoothing + Hessian‑guided weight compensation.
+* **Custom CUDA GEMM kernels** – per‑channel & per‑group W4A8 GEMMs deliver up to **3.7×** speed‑up over cuBLAS FP16.
+* **Rotation & GPTQ hooks** – optional weight rotation and MSE‑optimised GPTQ blocks for extra accuracy.
+* **Broad model support** – LLaMA‑1/2/3, Qwen‑2, and any Hugging Face causal LM (tested up to 70 B).
+  *This fork adds turn‑key scripts for a 3.18 B custom model.*
+* **vLLM integration** – one‑line deployment on the high‑throughput vLLM runtime.
+
+---
+
+## 🗂️ Repository Layout
+
+| Path                              | What’s inside                                                                 |
+| --------------------------------- | ----------------------------------------------------------------------------- |
+| `assets/figures/`                 | Experiment plots & diagrams                                                   |
+| `csrc/`                           | C++ / CUDA kernels and Triton utilities                                       |
+| `examples/`                       | Python reference scripts (`quant_model.py`, `eval_model.py`, `test_model.py`) |
+| `scripts/`                        | Handy shell wrappers for batch jobs (quantize / eval / infer)                 |
+| `third-party/`                    | Vendored code — GPTQ, Marlin, SmoothQuant, QuaRot, …                          |
+| Top‑level `*.ipynb`               | Reproducible notebooks for ablation & LLaMA‑3 evaluation                      |
+| `environment.yml`, `env_vars.txt` | Conda manifest & env variable template                                        |
+| `setup.py` / `requirements.txt`   | PEP‑517 build & minimal pip deps                                              |
+
+📄 *The full directory listing is visible on GitHub* ([github.com](https://github.com/skku970412/QQQ/tree/main))
+
+---
+
+## 🚀 Quick Installation
 
 ```bash
-# 1 Clone QQQ
+# clone & enter
 git clone https://github.com/skku970412/QQQ.git
 cd QQQ
 
-# 2 (optional) delete the hard‑coded prefix line
-#    because it contains the path of the author’s machine
-sed -i '/^prefix:/d' environment.yml          # Linux / macOS
-#  ► Windows PowerShell
-#  (Get-Content environment.yml) -notmatch '^prefix:' | Set-Content environment.yml
-
-# 3 Create & activate the conda env (≈ 5‑10 min)
+# create the full Conda env (Python 3.9 / CUDA 12.4)
 conda env create -f environment.yml
-conda activate qqq-py39          # env name comes from environment.yml
+conda activate qqq-py39
+
+# build C++/CUDA extensions
+pip install -v -e .
 ```
 
-### Quick sanity‑check
+For alternative setups or lighter images, see **README\_conda.md**.
+
+---
+
+## ⚡️ Quick Start
+
+### 1. Quantise a model
 
 ```bash
-python - <<'PY'
-import torch, transformers, accelerate, platform
-print("CUDA ", torch.version.cuda, "| GPU =", torch.cuda.get_device_name(0))
-print("PyTorch     ", torch.__version__)
-print("Transformers", transformers.__version__)
-print("Accelerate  ", accelerate.__version__)
-print("Python     ", platform.python_version())
-PY
+python examples/quant_model.py \
+  --model_path  /path/to/fp16-model \
+  --tokenizer_path /path/to/tokenizer \
+  --dtype float16 \
+  --smooth false \   # enable SmoothQuant style smoothing if needed
+  --rotation true \   # optional weight rotation
+  --dataset wikitext2 --nsamples 128 \
+  --w_quantizer FixedQuantize --w_group_size -1 \
+  --gptq_mse true --gptq_groupsize -1 \
+  --save_path  /path/to/w4a8-model
 ```
 
-If all versions print without errors, you are good to go.
-
----
-
-## Minimal install — build your own env
-
-Need a lighter test environment or different CUDA version? Start from the **minimal** template below and tweak versions as needed.
-
-<details>
-<summary>🔧 `minimal_environment.yml` template</summary>
-
-```yaml
-name: qqq-min
-channels:
-  - conda-forge
-  - nvidia
-  - defaults
-dependencies:
-  # Core
-  - python=3.9
-  - pip
-  # GPU stack (CUDA 12.4 — change to cu118 / cu121 … if required)
-  - cudatoolkit=12.4
-  - pytorch=2.6.0
-  - torchvision=0.21.0
-  - torchaudio=2.6.0
-  # Essential libs
-  - accelerate>=1.7
-  - zstandard
-  - pip:
-      - transformers==4.38.2
-      - datasets==2.16.1
-      - easydict
-      - lm_eval==0.4.2
-      - fast-hadamard-transform==1.0.4.post1
-      - sympy==1.13.1
-      - triton==3.2.0
-```
-
-</details>
+### 2. Evaluate perplexity & zero‑shot accuracy
 
 ```bash
-conda env create -f minimal_environment.yml
-conda activate qqq-min
+python examples/eval_model.py \
+  --model_path      /path/to/w4a8-model \
+  --tokenizer_path  /path/to/tokenizer \
+  --tasks "piqa,winogrande,hellaswag,arc_challenge,arc_easy" \
+  --eval_ppl --batch_size 8 --max_length 2048
 ```
 
-> **Different CUDA build?** Pair `pytorch` and `cudatoolkit` with the same CUDA tag (e.g. 11.8) or follow the official `pip install torch==…+cu118` instructions from [https://pytorch.org](https://pytorch.org).
+### 3. Inference with vLLM
+
+```python
+from vllm import LLM, SamplingParams
+llm = LLM(model="/path/to/w4a8-model", tokenizer="/path/to/tokenizer")
+out = llm.generate(["What is W4A8 quantization?"], SamplingParams())
+print(out[0].outputs[0].text)
+```
 
 ---
 
-## Extra setup & handy tips
+## 🗓️ Changelog (highlights)
 
-| Item                      | Notes                                                                                                                                            |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Environment variables** | An example `env_vars.txt` is provided. Typically you only need to adjust `CUDA_HOME` and `LD_LIBRARY_PATH` to your local GPU/CUDA paths.         |
-| **Compile C++/CUDA ops**  | Run `pip install -v -e .` once inside the activated env to build QQQ’s custom kernels.                                                           |
-| **Jupyter notebooks**     | Add `conda install jupyterlab` if you prefer interactive prototyping.                                                                            |
-| **Keeping the env fresh** | Sync with the latest commit via `conda env update -f environment.yml --prune` (or `mamba env update …`).                                         |
-| **Memory optimisation**   | Huge models (≥ 30 B) may not fit a single GPU — use vLLM, Hugging Face Accelerate, or 4‑bit KV‑cache tricks (`bitsandbytes`) to shard / offload. |
-
----
-
-## Troubleshooting FAQ
-
-| Symptom                          | Fix                                                                                                                                              |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `libcublas.so not found`         | Your conda CUDA build and installed NVIDIA driver are mismatched. Check `nvidia-smi` and reinstall `pytorch + cudatoolkit` matching that driver. |
-| Conda dependency solving is slow | Install **mamba** for a 2‑3× speed‑up: `conda install -n base -c conda-forge mamba`.                                                             |
-| `prefix already exists` error    | A previous env lives at the same path. Remove it with `conda env remove -p <path>` or create a new env name using `-n <new_name>`.               |
+* **2025‑03‑12**  Paper accepted at **ICLR 2025 SCI‑FM workshop**.([github.com](https://github.com/HandH1998/QQQ?utm_source=chatgpt.com))
+* **2024‑09‑26**  Smooth calibration code refactored; custom datasets supported.
+* **2024‑09‑12**  Added Qwen‑2 models (0.5 B → 72 B).
+* **2024‑08‑26**  Integrated weight rotation (accuracy ↑, no latency cost).
+* **2024‑07‑31**  Merged into **vLLM** master; see linked PR for details.
+* **2024‑07‑17**  `quant_config.json` now auto‑embedded in `config.json`.
+* **2024‑06‑17**  Pre‑print released on arXiv.
+* **2024‑06‑03**  Initial code release.
 
 ---
 
-### 🚀 All set!
+## 🤝 Contributing
 
-You can now run `examples/quant_model.py`, `examples/eval_model.py`, or `examples/test_model.py` to **quantize, benchmark, and generate text with your 3.18 B W4A8 QQQ model**.
+Pull requests are welcome — especially for **new model recipes, bug fixes, and kernel optimisations**.
+Please create an issue first if you plan a large change.
+
+---
+
+## 📜 License & Citation
+
+QQQ is released under the **Apache 2.0** license.
+If you use this codebase or its kernels in your research, please cite:
+
+```bibtex
+@article{zhang2024qqq,
+  title   = {QQQ: Quality Quattuor-Bit Quantization for Large Language Models},
+  author  = {Ying Zhang and Peng Zhang and Mincong Huang and Jingyang Xiang and Yujie Wang and Chao Wang and Yineng Zhang and Lei Yu and Chuan Liu and Wei Lin},
+  journal = {arXiv preprint arXiv:2406.09904},
+  year    = 2024
+}
+```
+
+---
+
+*Happy quantising!* 🎉
