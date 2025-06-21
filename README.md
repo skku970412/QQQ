@@ -88,6 +88,7 @@ python examples/eval_model.py \
 ### 3. Inference with vLLM
 
 ```
+pip install vllm
 python vllm_serv.py
 ```
 
