@@ -87,11 +87,8 @@ python examples/eval_model.py \
 
 ### 3. Inference with vLLM
 
-```python
-from vllm import LLM, SamplingParams
-llm = LLM(model="/path/to/w4a8-model", tokenizer="/path/to/tokenizer")
-out = llm.generate(["What is W4A8 quantization?"], SamplingParams())
-print(out[0].outputs[0].text)
+```
+python vllm_serv.py
 ```
 
 ---
