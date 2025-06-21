@@ -30,7 +30,7 @@ It allows **3.18 B‑parameter and larger models** to run up to **≈ 2.2× 
 | `csrc/`                           | C++ / CUDA kernels and Triton utilities                                       |
 | `examples/`                       | Python reference scripts (`quant_model.py`, `eval_model.py`, `test_model.py`) |
 | `scripts/`                        | Handy shell wrappers for batch jobs (quantize / eval / infer)                 |
-| `third-party/`                    | Vendored code — GPTQ, Marlin, SmoothQuant, QuaRot, …                          |
+| `third-party/`                    | Vendored code — fast-hadamard-transform …                          |
 | Top‑level `*.ipynb`               | Reproducible notebooks for ablation & LLaMA‑3 evaluation                      |
 | `environment.yml`, `env_vars.txt` | Conda manifest & env variable template                                        |
 | `setup.py` / `requirements.txt`   | PEP‑517 build & minimal pip deps                                              |
