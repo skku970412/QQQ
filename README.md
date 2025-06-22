@@ -16,7 +16,7 @@ It allows **3.18 B‑parameter and larger models** to run up to **≈ 2.2× 
 * **W4A8 end‑to‑end pipeline** – adaptive activation smoothing + Hessian‑guided weight compensation.
 * **Custom CUDA GEMM kernels** – per‑channel & per‑group W4A8 GEMMs deliver up to **3.7×** speed‑up over cuBLAS FP16.
 * **Rotation & GPTQ hooks** – optional weight rotation and MSE‑optimised GPTQ blocks for extra accuracy.
-* **Broad model support** – LLaMA‑1/2/3, Qwen‑2, and any Hugging Face causal LM (tested up to 70 B).
+* **Narrow model support** –
   *This fork adds turn‑key scripts for a 3.18 B custom model.*
 * **vLLM integration** – one‑line deployment on the high‑throughput vLLM runtime.
 
