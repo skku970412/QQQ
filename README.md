@@ -1,133 +1,53 @@
-# QQQ: Quality Quattuor‑Bit Quantization for Large Language Models
+## 📦 QQQ: LLaMA 3.1–8B 전용 W4A8 양자화 툴킷
 
-> **Effortlessly compress — and *accelerate* — LLMs with 4‑bit weights (W4) & 8‑bit activations (A8).**
-
-QQQ is a research‑driven, hardware‑friendly W4A8 post‑training quantization toolkit.
-It allows **3.18 B‑parameter and larger models** to run up to **≈ 2.2× faster** than their FP16 counterparts while retaining near‑original perplexity and zero‑shot accuracy.
-
-<div align="center">
-  <img src="assets/figures/throughput.png" alt="Throughput comparison" width="600"/>
-</div>
+**QQQ**는 **LLaMA 3.1 8B 모델 전용**으로 설계된 연구 기반의 W4A8 (4-bit weight, 8-bit activation) 포스트 트레이닝 양자화(PTQ) 툴킷입니다.  
+다른 모델은 지원하지 않으며, 모든 기능은 **LLaMA 3.1–8B에만 최적화**되어 있습니다.
 
 ---
 
-## 🔑 Key Features
+### 🔑 주요 기능
 
-* **W4A8 end‑to‑end pipeline** – adaptive activation smoothing + Hessian‑guided weight compensation.
-* **Custom CUDA GEMM kernels** – per‑channel & per‑group W4A8 GEMMs deliver up to **3.7×** speed‑up over cuBLAS FP16.
-* **Rotation & GPTQ hooks** – optional weight rotation and MSE‑optimised GPTQ blocks for extra accuracy.
-* **Narrow model support** –
-  *This fork adds turn‑key scripts for a 3.18 B custom model.*
-* **vLLM integration** – one‑line deployment on the high‑throughput vLLM runtime.
-
----
-
-## 🗂️ Repository Layout
-
-| Path                              | What’s inside                                                                 |
-| --------------------------------- | ----------------------------------------------------------------------------- |
-| `assets/figures/`                 | Experiment plots & diagrams                                                   |
-| `csrc/`                           | C++ / CUDA kernels and Triton utilities                                       |
-| `examples/`                       | Python reference scripts (`quant_model.py`, `eval_model.py`, `test_model.py`) |
-| `scripts/`                        | Handy shell wrappers for batch jobs (quantize / eval / infer)                 |
-| `third-party/`                    | Vendored code — fast-hadamard-transform …                          |
-| Top‑level `*.ipynb`               | Reproducible notebooks for ablation & LLaMA‑3 evaluation                      |
-| `environment.yml`, `env_vars.txt` | Conda manifest & env variable template                                        |
-| `setup.py` / `requirements.txt`   | PEP‑517 build & minimal pip deps                                              |
-
-📄 *The full directory listing is visible on GitHub* ([github.com](https://github.com/skku970412/QQQ/tree/main))
+- **W4A8 전체 양자화 파이프라인**
+  - SmoothQuant 스타일의 활성화 평활화 지원 (선택적)
+  - 헤시안 기반 가중치 보정
+- **커스텀 CUDA GEMM 커널**
+  - per-channel 및 per-group 방식 W4A8 연산
+  - cuBLAS FP16 대비 최대 **3.7×** 속도 향상
+- **정확도 향상 기술**
+  - 선택적 Weight Rotation
+  - MSE 최적화 GPTQ 블록
+- **vLLM 통합**
+  - `--quantization qqq` 옵션으로 Marlin 커널 기반 고속 추론
 
 ---
 
-## 🚀 Quick Installation
+### ✅ 지원 모델
+
+| 모델 이름              | 지원 여부 |
+|------------------------|-----------|
+| ✅ LLaMA 3.1 8B         | 지원됨     |
+| ❌ LLaMA 3.0 / 7B / 13B / 65B | 미지원 |
+| ❌ Qwen, Mistral, OPT, Bloom 등 | 미지원 |
+
+> 📌 본 저장소는 **LLaMA 3.1–8B 전용**입니다. 다른 모델에 적용하면 예상치 못한 오류가 발생할 수 있습니다.
+
+---
+
+### ⚙️ 설치
 
 ```bash
-# clone & enter
 git clone https://github.com/skku970412/QQQ.git
 cd QQQ
-
-# create the full Conda env (Python 3.9 / CUDA 12.4)
 conda env create -f environment.yml
 conda activate qqq-py39
-
-# build C++/CUDA extensions
 pip install -v -e .
-```
+📜 License & Citation
+QQQ is released under the Apache 2.0 license. If you use this codebase or its kernels in your research, please cite:
 
-For alternative setups or lighter images, see **README\_conda.md**.
-
----
-
-## ⚡️ Quick Start
-
-### 1. Quantise a model
-
-```bash
-python examples/quant_model.py \
-  --model_path  /path/to/fp16-model \
-  --tokenizer_path /path/to/tokenizer \
-  --dtype float16 \
-  --smooth false \   # enable SmoothQuant style smoothing if needed
-  --rotation true \   # optional weight rotation
-  --dataset wikitext2 --nsamples 128 \
-  --w_quantizer FixedQuantize --w_group_size -1 \
-  --gptq_mse true --gptq_groupsize -1 \
-  --save_path  /path/to/w4a8-model
-```
-
-### 2. Evaluate perplexity & zero‑shot accuracy
-
-```bash
-python examples/eval_model.py \
-  --model_path      /path/to/w4a8-model \
-  --tokenizer_path  /path/to/tokenizer \
-  --tasks "piqa,winogrande,hellaswag,arc_challenge,arc_easy" \
-  --eval_ppl --batch_size 8 --max_length 2048
-```
-
-### 3. Inference with vLLM
-
-```
-pip install vllm
-python vllm_serv.py
-```
-
----
-
-## 🗓️ Changelog (highlights)
-
-* **2025‑03‑12**  Paper accepted at **ICLR 2025 SCI‑FM workshop**.([github.com](https://github.com/HandH1998/QQQ?utm_source=chatgpt.com))
-* **2024‑09‑26**  Smooth calibration code refactored; custom datasets supported.
-* **2024‑09‑12**  Added Qwen‑2 models (0.5 B → 72 B).
-* **2024‑08‑26**  Integrated weight rotation (accuracy ↑, no latency cost).
-* **2024‑07‑31**  Merged into **vLLM** master; see linked PR for details.
-* **2024‑07‑17**  `quant_config.json` now auto‑embedded in `config.json`.
-* **2024‑06‑17**  Pre‑print released on arXiv.
-* **2024‑06‑03**  Initial code release.
-
----
-
-## 🤝 Contributing
-
-Pull requests are welcome — especially for **new model recipes, bug fixes, and kernel optimisations**.
-Please create an issue first if you plan a large change.
-
----
-
-## 📜 License & Citation
-
-QQQ is released under the **Apache 2.0** license.
-If you use this codebase or its kernels in your research, please cite:
-
-```bibtex
 @article{zhang2024qqq,
   title   = {QQQ: Quality Quattuor-Bit Quantization for Large Language Models},
   author  = {Ying Zhang and Peng Zhang and Mincong Huang and Jingyang Xiang and Yujie Wang and Chao Wang and Yineng Zhang and Lei Yu and Chuan Liu and Wei Lin},
   journal = {arXiv preprint arXiv:2406.09904},
   year    = 2024
 }
-```
-
----
-
-*Happy quantising!* 🎉
+Happy quantising! 🎉
